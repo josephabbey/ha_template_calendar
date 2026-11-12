@@ -3,19 +3,23 @@
 import logging
 from datetime import datetime
 from typing import Any
-# from ast import literal_eval
 
-import voluptuous as vol
+import probatio
 from homeassistant.components.calendar import (
-    CALENDAR_EVENT_SCHEMA,
     CalendarEntity,
     CalendarEvent,
 )
+from homeassistant.components.calendar.entity import CALENDAR_EVENT_SCHEMA
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback, Event
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import TemplateError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_template_result, TrackTemplate, TrackTemplateResult, EventStateChangedData
+from homeassistant.helpers.event import (
+    EventStateChangedData,
+    TrackTemplate,
+    TrackTemplateResult,
+    async_track_template_result,
+)
 from homeassistant.helpers.template import Template
 
 _LOGGER = logging.getLogger(__name__)
@@ -87,7 +91,7 @@ class TemplateCalendarEntity(CalendarEntity):
         self._attr_unique_id = config_entry_id
 
     async def async_added_to_hass(self) -> None:
-        """Entity added to hass — set up template dependency listeners and render initial events."""
+        """Set up template listeners and render initial events."""
         await super().async_added_to_hass()
         self.async_on_remove(
             async_track_template_result(
@@ -114,11 +118,16 @@ class TemplateCalendarEntity(CalendarEntity):
         return [
             event
             for event in self._events
-            if event.start_datetime_local and end_date > event.start_datetime_local >= start_date
+            if event.start_datetime_local
+            and end_date > event.start_datetime_local >= start_date
         ]
 
     @callback
-    def _parse_template_result(self, event: Event[EventStateChangedData] | None, updates: list[TrackTemplateResult]) -> None:
+    def _parse_template_result(
+        self,
+        event: Event[EventStateChangedData] | None,
+        updates: list[TrackTemplateResult],
+    ) -> None:
         """Parse the result of the template rendering."""
         result = updates[0].result
 
@@ -135,16 +144,6 @@ class TemplateCalendarEntity(CalendarEntity):
             self.async_write_ha_state()
             return
 
-        # try:
-        #     data = literal_eval(result)
-        # except Exception as e:
-        #     _LOGGER.error("Template %s did not return valid JSON", self._name)
-        #     _LOGGER.exception(e)
-        #     self._events = []
-        #     self._event = None
-        #     self.async_write_ha_state()
-        #     return
-
         data = result
 
         if not isinstance(data, list):
@@ -156,11 +155,15 @@ class TemplateCalendarEntity(CalendarEntity):
 
         self._events = []
         for event_data in data:
+            # The schema coerces start/end from ISO strings into date/datetime
+            # objects and validates the event structure.
             try:
                 validated = CALENDAR_EVENT_SCHEMA(event_data)
                 self._events.append(CalendarEvent(**validated))
-            except (vol.Invalid, TypeError, ValueError) as err:
-                _LOGGER.warning("Invalid event data from template %s: %s", self._name, err)
+            except (probatio.Invalid, TypeError, ValueError) as err:
+                _LOGGER.warning(
+                    "Invalid event data from template %s: %s", self._name, err
+                )
 
         self._events.sort(key=lambda x: x.start)
         self._event = self._events[0] if self._events else None
